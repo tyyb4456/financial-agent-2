@@ -7,8 +7,8 @@
 from __future__ import annotations
 import structlog
 from langgraph.graph import StateGraph, START, END
-from config.llm import get_llm
-from state.schemas import FinancialState
+from backend.config.llm import get_llm
+from backend.state.schemas import FinancialState
 from backend.tools.finance import fetch_financials
 
 log = structlog.get_logger(__name__)
@@ -82,7 +82,5 @@ from langchain.agents import create_agent
 financial_reporter_agent = create_agent(
                     model=_llm, 
                     tools=[fetch_financials],
-                    description="Agent for analyzing financial data and generating reports",
-                    state_schema=FinancialState,
                     system_prompt=_REPORT_PROMPT
                 )

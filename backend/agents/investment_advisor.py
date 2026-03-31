@@ -7,8 +7,8 @@
 from __future__ import annotations
 import structlog
 from langgraph.graph import StateGraph, START, END
-from config.llm import get_llm
-from state.schemas import InvestmentState
+from backend.config.llm import get_llm
+from backend.state.schemas import InvestmentState
 from backend.tools.finance import fetch_investment_analysis
 
 log = structlog.get_logger(__name__)
@@ -71,10 +71,8 @@ If insufficient data exists for a target, state: "Insufficient data for a reliab
 
 from langchain.agents import create_agent
 
-financial_reporter_agent = create_agent(
+investment_advisor_agent = create_agent(
                     model=_llm, 
                     tools=[fetch_investment_analysis],
-                    description="Use the `fetch_investment_analysis` tool to get financial and valuation data for the given stock symbol. Then produce a structured investment report with a clear recommendation and price target based on the data.",
-                    state_schema=InvestmentState,
                     system_prompt=_PROMPT
                 )
