@@ -12,7 +12,7 @@ Usage:
 
 from functools import lru_cache
 from langchain.chat_models import init_chat_model
-from backend.config.setting import settings 
+from config.setting import settings 
 
 
 # ── Default model identifiers ─────────────────────────────────────────────────

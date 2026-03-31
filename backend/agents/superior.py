@@ -7,6 +7,7 @@ from .news_reporting import news_reporter_agent
 from .competitor_benchmarking import competitor_benchmarking_agent
 from .reddit_posts_analysis import reddit_posts_analyst_agent
 from .technical_analysis import technical_analysis_agent
+from .portfolio_optimizer import portfolio_optimizer_agent
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -22,6 +23,27 @@ from pydantic import BaseModel, Field
 class RedditInput(BaseModel):
     symbol: str = Field(description="Stock ticker symbol, e.g. TSLA")
     subreddit: str = Field(description="Subreddit name, e.g. wallstreetbets")
+
+class PortfolioInput(BaseModel):
+    """Input for portfolio optimization requests."""
+    request_type: str = Field(
+        description="Type of request: 'optimize' (new portfolio) or 'rebalance' (existing portfolio)"
+    )
+    symbols: list[str] = Field(
+        description="List of stock tickers to include, e.g. ['AAPL', 'MSFT', 'GOOGL']"
+    )
+    current_holdings: dict[str, float] | None = Field(
+        default=None,
+        description="For rebalancing: current holdings as {symbol: shares}, e.g. {'AAPL': 10, 'MSFT': 5}"
+    )
+    portfolio_value: float | None = Field(
+        default=None,
+        description="Total portfolio value in USD — required for rebalancing trade generation"
+    )
+    optimization_method: str = Field(
+        default="max_sharpe",
+        description="Optimization objective: 'max_sharpe', 'min_volatility', or 'efficient_return'"
+    )
 
 _llm = get_llm()
 
@@ -168,6 +190,38 @@ async def call_technical_agent(query: str) -> str:
 
 
 
+# ------------------
+# portfolio optimizer tool
+# ------------------
+
+@tool("portfolio_optimizer", args_schema=PortfolioInput,
+      description="Optimize a stock portfolio using Modern Portfolio Theory. Use for 'optimize my portfolio', 'rebalance my holdings', 'best allocation for AAPL MSFT GOOGL', or 'should I rebalance?'")
+async def call_portfolio_optimizer(
+    request_type: str,
+    symbols: list[str],
+    current_holdings: dict[str, float] | None = None,
+    portfolio_value: float | None = None,
+    optimization_method: str = "max_sharpe",
+) -> str:
+    @_retry
+    async def _run():
+        # Build the request message based on type
+        if request_type == "optimize":
+            msg = f"Optimize portfolio for: {', '.join(symbols)}. Method: {optimization_method}"
+        elif request_type == "rebalance":
+            holdings_str = ', '.join(f"{sym}:{shares}" for sym, shares in (current_holdings or {}).items())
+            msg = f"Rebalance portfolio. Current: {holdings_str}. Target tickers: {', '.join(symbols)}. Portfolio value: ${portfolio_value:,.0f}. Method: {optimization_method}"
+        else:
+            msg = f"Portfolio request: {request_type}. Symbols: {', '.join(symbols)}"
+
+        result = await portfolio_optimizer_agent.ainvoke({
+            "messages": [{"role": "user", "content": msg}]
+        })
+        return _extract_text(result["messages"][-1].content)
+    return await _run()
+
+
+
 
 # ------------- Main superior agent that routes to the right specialist tool -------------
 
@@ -186,6 +240,7 @@ to specialist tools. You synthesise the results into a single coherent response.
 | `benchmark`          | User asks how a stock compares to peers or competitors                |
 | `reddit_post_analyst`| User asks about retail sentiment, Reddit chatter, or crowd opinion    |
 | `technical_analysis` | User asks about chart signals, price action, or a trade setup         |
+| `portfolio_optimizer`| User wants portfolio optimization, rebalancing, or asset allocation   |
 
 ---
 
@@ -205,11 +260,13 @@ Match each intent to exactly one tool using the table above.
   - If the query mentions "news", "earnings", "announced", "just happened" → always include `search_news`.
   - If the query mentions "Reddit", "wallstreetbets", "retail", "sentiment" → always include `reddit_post_analyst`.
   - If the query mentions "compare", "vs", "better than", "peers", "competitors" → always include `benchmark`.
+  - If the query mentions "portfolio", "optimize", "rebalance", "allocation", "diversify", "efficient frontier", "Sharpe ratio" → always include `portfolio_optimizer`.
 
 ### Step 3 — 
 --pass the only stock symbol to tools like financial, investment, benchmark
 -- Pass the full query to tools like query, news, technical since they may need the context to determine what specific information to pull.
 -- passs the stock symbol and subreddit to reddit_post_analyst since it needs both to fetch the right posts and analyse them.
+-- For portfolio_optimizer, extract: request_type ('optimize' or 'rebalance'), symbols (list of tickers), current_holdings (if rebalancing), portfolio_value (if rebalancing), optimization_method (default 'max_sharpe').
 Always pass the user's original query including the ticker symbol to every tool you call.
 Do not paraphrase or strip context from the query before sending it.
 
@@ -226,6 +283,14 @@ Do not paraphrase or strip context from the query before sending it.
      • the stock symbol
      • the subreddit name (e.g. "wallstreetbets")
 
+- For `portfolio_optimizer`:
+  → Extract and pass:
+     • request_type: "optimize" (new portfolio) or "rebalance" (existing holdings)
+     • symbols: list of tickers
+     • current_holdings: {symbol: shares} if rebalancing
+     • portfolio_value: total $ value if rebalancing
+     • optimization_method: "max_sharpe" (default), "min_volatility", or "efficient_return"
+
 - Always preserve the original user intent.
   Do not paraphrase or remove important context when passing inputs to tools.
 
@@ -235,6 +300,7 @@ Do not paraphrase or strip context from the query before sending it.
 - Never say "I can't access real-time data" — you have tools for that.
 - If a ticker is ambiguous (e.g. "Apple" without AAPL), resolve it to the most likely symbol before calling tools.
 - If no ticker is provided and one is required, ask the user for it before calling any tool.
+- For portfolio optimization, if the user doesn't specify holdings or value, ask for clarification.
 """
 
 
@@ -248,6 +314,7 @@ main_agent = create_agent(
         call_benchmark_agent,
         call_reddit_agent,
         call_technical_agent,
+        call_portfolio_optimizer,
     ],
     system_prompt=MAIN_PROMPT
 )
