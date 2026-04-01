@@ -9,6 +9,7 @@ from .reddit_posts_analysis import reddit_posts_analyst_agent
 from .technical_analysis import technical_analysis_agent
 from .portfolio_optimizer import portfolio_optimizer_agent
 from .dividend_capture import dividend_capture_agent
+from .expense_analysis import expense_analyzer_agent
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -288,6 +289,59 @@ async def call_dividend_capture(
     return await _run()
 
 
+# -------------
+# expense analysis tool
+# -------------
+
+class ExpenseInput(BaseModel):
+    transactions: list[dict] = Field(
+        description=(
+            "List of raw bank transaction dicts. Each must have at minimum: "
+            "'date' (YYYY-MM-DD), 'description' (merchant name), "
+            "'amount' (positive = expense, negative = income). "
+            "Optional: 'id', 'account'."
+        )
+    )
+    budget_limits: dict[str, float] | None = Field(
+        default=None,
+        description=(
+            "Optional monthly budget limits per category in USD, e.g. "
+            "{'Food & Dining': 500, 'Transport': 200}."
+        ),
+    )
+    month: str | None = Field(
+        default=None,
+        description="Month to analyze in YYYY-MM format, e.g. '2024-03'. Defaults to most common month in data.",
+    )
+ 
+@tool("expense_analyzer", args_schema=ExpenseInput,
+      description=(
+          "Parse bank transactions, categorize spending, flag budget overruns, "
+          "and generate actionable cut recommendations. "
+          "Use for: 'analyze my spending', 'where is my money going', "
+          "'am I over budget', 'how can I save more', 'categorize my transactions'."
+      ))
+async def call_expense_agent(
+    transactions: list[dict],
+    budget_limits: dict[str, float] | None = None,
+    month: str | None = None,
+) -> str:
+    @_retry
+    async def _run():
+        msg_parts = [f"Analyze these {len(transactions)} transactions."]
+        if budget_limits:
+            msg_parts.append(f"Budget limits: {budget_limits}")
+        if month:
+            msg_parts.append(f"Focus on month: {month}")
+        msg_parts.append(f"Transactions: {transactions}")
+ 
+        result = await expense_analyzer_agent.ainvoke({
+            "messages": [{"role": "user", "content": "\n".join(msg_parts)}]
+        })
+        return _extract_text(result["messages"][-1].content)
+    return await _run()
+
+
 
 
 # ------------- Main superior agent that routes to the right specialist tool -------------
@@ -309,6 +363,7 @@ to specialist tools. You synthesise the results into a single coherent response.
 | `technical_analysis` | User asks about chart signals, price action, or a trade setup         |
 | `portfolio_optimizer`| User wants portfolio optimization, rebalancing, or asset allocation   |
 | `dividend_capture`   | User asks about dividend trading, ex-dates, or dividend opportunities |
+| `expense_analyzer`   | User wants spending analysis, budget check, or savings advice         |
 
 ---
 
@@ -330,6 +385,7 @@ Match each intent to exactly one tool using the table above.
   - If the query mentions "compare", "vs", "better than", "peers", "competitors" → always include `benchmark`.
   - If the query mentions "portfolio", "optimize", "rebalance", "allocation", "diversify", "efficient frontier", "Sharpe ratio" → always include `portfolio_optimizer`.
   - If the query mentions "dividend", "ex-date", "dividend capture", "dividend calendar", "upcoming dividends", "dividend trading" → always include `dividend_capture`.
+  - If the query mentions "transactions", "spending", "budget" -- "where did my money go", "categorize expenses" → always include `expense_analyzer`.
 
 ### Step 3 — 
 --pass the only stock symbol to tools like financial, investment, benchmark
@@ -368,6 +424,11 @@ Do not paraphrase or strip context from the query before sending it.
      • entry_price, shares, dividend_per_share: for analyze requests
      • min_yield, universe: for screen requests
 
+- For `expense_analyzer`:
+  → Pass: transactions (list of dicts), budget_limits (optional), month (optional YYYY-MM)
+  → If the user pastes raw transaction data, extract it into the required dict format.
+  → If budget_limits not specified, omit — tool uses sensible defaults.
+
 - Always preserve the original user intent.
   Do not paraphrase or remove important context when passing inputs to tools.
 
@@ -394,6 +455,7 @@ main_agent = create_agent(
         call_technical_agent,
         call_portfolio_optimizer,
         call_dividend_capture,
+        call_expense_agent,
     ],
     system_prompt=MAIN_PROMPT
 )
