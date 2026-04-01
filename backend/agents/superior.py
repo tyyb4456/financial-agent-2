@@ -8,6 +8,7 @@ from .competitor_benchmarking import competitor_benchmarking_agent
 from .reddit_posts_analysis import reddit_posts_analyst_agent
 from .technical_analysis import technical_analysis_agent
 from .portfolio_optimizer import portfolio_optimizer_agent
+from .dividend_capture import dividend_capture_agent
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -222,6 +223,72 @@ async def call_portfolio_optimizer(
 
 
 
+# ------------------
+# dividend capture tool
+# ------------------
+
+class DividendCaptureInput(BaseModel):
+    """Input for dividend capture requests."""
+    request_type: str = Field(
+        description="Type of request: 'calendar' (upcoming ex-dates), 'analyze' (profit calc for specific trade), or 'screen' (find best opportunities)"
+    )
+    symbols: list[str] | None = Field(
+        default=None,
+        description="For calendar: tickers to check. For screen: custom universe if applicable."
+    )
+    entry_price: float | None = Field(
+        default=None,
+        description="For analyze: expected entry price per share"
+    )
+    shares: int | None = Field(
+        default=None,
+        description="For analyze: number of shares to buy"
+    )
+    dividend_per_share: float | None = Field(
+        default=None,
+        description="For analyze: expected dividend per share"
+    )
+    min_yield: float | None = Field(
+        default=0.015,
+        description="For screen: minimum dividend yield (default 1.5%)"
+    )
+    universe: str | None = Field(
+        default="sp500",
+        description="For screen: 'sp500', 'dow30', 'nasdaq100', or 'custom'"
+    )
+
+@tool("dividend_capture", args_schema=DividendCaptureInput,
+      description="Find dividend capture trading opportunities. Use for 'what dividends are coming up', 'is this dividend capture profitable', 'find best dividend trades', or 'screen for dividend opportunities'.")
+async def call_dividend_capture(
+    request_type: str,
+    symbols: list[str] | None = None,
+    entry_price: float | None = None,
+    shares: int | None = None,
+    dividend_per_share: float | None = None,
+    min_yield: float | None = 0.015,
+    universe: str | None = "sp500",
+) -> str:
+    @_retry
+    async def _run():
+        # Build the request message based on type
+        if request_type == "calendar":
+            syms_str = ', '.join(symbols) if symbols else "my watchlist"
+            msg = f"Show me upcoming ex-dividend dates for: {syms_str}"
+        elif request_type == "analyze":
+            msg = f"Analyze dividend capture trade: {symbols[0] if symbols else 'unknown'} at ${entry_price}, {shares} shares, ${dividend_per_share} dividend"
+        elif request_type == "screen":
+            msg = f"Screen for best dividend capture opportunities in {universe}. Min yield: {min_yield*100:.1f}%"
+        else:
+            msg = f"Dividend capture request: {request_type}"
+
+        result = await dividend_capture_agent.ainvoke({
+            "messages": [{"role": "user", "content": msg}]
+        })
+        return _extract_text(result["messages"][-1].content)
+    return await _run()
+
+
+
 
 # ------------- Main superior agent that routes to the right specialist tool -------------
 
@@ -241,6 +308,7 @@ to specialist tools. You synthesise the results into a single coherent response.
 | `reddit_post_analyst`| User asks about retail sentiment, Reddit chatter, or crowd opinion    |
 | `technical_analysis` | User asks about chart signals, price action, or a trade setup         |
 | `portfolio_optimizer`| User wants portfolio optimization, rebalancing, or asset allocation   |
+| `dividend_capture`   | User asks about dividend trading, ex-dates, or dividend opportunities |
 
 ---
 
@@ -261,12 +329,14 @@ Match each intent to exactly one tool using the table above.
   - If the query mentions "Reddit", "wallstreetbets", "retail", "sentiment" → always include `reddit_post_analyst`.
   - If the query mentions "compare", "vs", "better than", "peers", "competitors" → always include `benchmark`.
   - If the query mentions "portfolio", "optimize", "rebalance", "allocation", "diversify", "efficient frontier", "Sharpe ratio" → always include `portfolio_optimizer`.
+  - If the query mentions "dividend", "ex-date", "dividend capture", "dividend calendar", "upcoming dividends", "dividend trading" → always include `dividend_capture`.
 
 ### Step 3 — 
 --pass the only stock symbol to tools like financial, investment, benchmark
 -- Pass the full query to tools like query, news, technical since they may need the context to determine what specific information to pull.
 -- passs the stock symbol and subreddit to reddit_post_analyst since it needs both to fetch the right posts and analyse them.
 -- For portfolio_optimizer, extract: request_type ('optimize' or 'rebalance'), symbols (list of tickers), current_holdings (if rebalancing), portfolio_value (if rebalancing), optimization_method (default 'max_sharpe').
+-- For dividend_capture, extract: request_type ('calendar', 'analyze', or 'screen'), symbols (for calendar/analyze), entry_price/shares/dividend_per_share (for analyze), min_yield/universe (for screen).
 Always pass the user's original query including the ticker symbol to every tool you call.
 Do not paraphrase or strip context from the query before sending it.
 
@@ -291,6 +361,13 @@ Do not paraphrase or strip context from the query before sending it.
      • portfolio_value: total $ value if rebalancing
      • optimization_method: "max_sharpe" (default), "min_volatility", or "efficient_return"
 
+- For `dividend_capture`:
+  → Extract and pass:
+     • request_type: "calendar" (upcoming ex-dates), "analyze" (profit calc), or "screen" (find opportunities)
+     • symbols: list of tickers (for calendar) or single ticker (for analyze)
+     • entry_price, shares, dividend_per_share: for analyze requests
+     • min_yield, universe: for screen requests
+
 - Always preserve the original user intent.
   Do not paraphrase or remove important context when passing inputs to tools.
 
@@ -301,6 +378,7 @@ Do not paraphrase or strip context from the query before sending it.
 - If a ticker is ambiguous (e.g. "Apple" without AAPL), resolve it to the most likely symbol before calling tools.
 - If no ticker is provided and one is required, ask the user for it before calling any tool.
 - For portfolio optimization, if the user doesn't specify holdings or value, ask for clarification.
+- For dividend capture, if request_type is unclear, default to 'screen' (find opportunities).
 """
 
 
@@ -315,6 +393,7 @@ main_agent = create_agent(
         call_reddit_agent,
         call_technical_agent,
         call_portfolio_optimizer,
+        call_dividend_capture,
     ],
     system_prompt=MAIN_PROMPT
 )
