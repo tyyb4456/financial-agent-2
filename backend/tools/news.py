@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 from langchain.tools import tool
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
-from backend.config.setting import settings
+from config.setting import settings
 
 log = structlog.get_logger(__name__)
 

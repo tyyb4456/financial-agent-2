@@ -9,7 +9,7 @@
 from __future__ import annotations
 import structlog
 from config.llm import get_llm
-from backend.tools.technical import (
+from tools.technical import (
     fetch_price_history,
     fetch_indicators,
     fetch_support_resistance,

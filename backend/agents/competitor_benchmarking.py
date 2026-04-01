@@ -9,7 +9,7 @@
 from __future__ import annotations
 import structlog
 from config.llm import get_llm
-from backend.tools.benchmarking import fetch_peer_group, fetch_peer_metrics
+from tools.benchmarking import fetch_peer_group, fetch_peer_metrics
 
 log = structlog.get_logger(__name__)
 _llm = get_llm()

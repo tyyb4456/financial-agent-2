@@ -1,5 +1,7 @@
 # superior agent
 
+from logging import log
+
 from .financial_reporting import financial_reporter_agent
 from .investment_advise import investment_advisor_agent
 from .query_answer import query_agent
@@ -19,8 +21,14 @@ import httpx
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from langchain.tools import tool
 from langchain.agents import create_agent
-from backend.config.llm import get_llm
+from config.llm import get_llm
 from pydantic import BaseModel, Field
+from memory import get_checkpointer
+
+import structlog
+
+
+log = structlog.get_logger(__name__)
 
 class RedditInput(BaseModel):
     symbol: str = Field(description="Stock ticker symbol, e.g. TSLA")
@@ -442,39 +450,65 @@ Do not paraphrase or strip context from the query before sending it.
 - For dividend capture, if request_type is unclear, default to 'screen' (find opportunities).
 """
 
-
-main_agent = create_agent(
-    model=_llm,
-    tools=[
-        call_financial_agent,
-        call_investment_agent,
-        call_query_agent,
-        call_news_agent,
-        call_benchmark_agent,
-        call_reddit_agent,
-        call_technical_agent,
-        call_portfolio_optimizer,
-        call_dividend_capture,
-        call_expense_agent,
-    ],
-    system_prompt=MAIN_PROMPT
-)
+_main_agent = None
+ 
+ 
+async def get_main_agent():
+    """
+    Lazily build main_agent with the persistent checkpointer.
+    Safe to call multiple times — returns cached instance after first build.
+    """
+    global _main_agent
+    if _main_agent is not None:
+        return _main_agent
+ 
+    checkpointer = await get_checkpointer()
+    _main_agent = create_agent(
+        model=_llm,
+        tools=[
+            call_financial_agent,
+            call_investment_agent,
+            call_query_agent,
+            call_news_agent,
+            call_benchmark_agent,
+            call_reddit_agent,
+            call_technical_agent,
+            call_portfolio_optimizer,
+            call_dividend_capture,
+            call_expense_agent,
+        ],
+        system_prompt=MAIN_PROMPT,
+        checkpointer=checkpointer,
+    )
+    log.info("superior.main_agent.ready")
+    return _main_agent
 
 async def main():
-    print("Financial Assistant ready. Type 'exit' to quit.\n")
+    """
+    Interactive CLI for testing. Each session gets a unique thread_id.
+    Pass the same thread_id across turns to maintain context.
+    """
+    import uuid
+    agent = await get_main_agent()
+    thread_id = str(uuid.uuid4())
+ 
+    print(f"\nFinancial Assistant ready (thread: {thread_id[:8]}…). Type 'exit' to quit.\n")
+ 
     while True:
-        user_input = input("Ask me anything about a stock: ").strip()
+        user_input = input("You: ").strip()
         if user_input.lower() in ("exit", "quit"):
             break
         if not user_input:
             continue
-
-        result = await main_agent.ainvoke({
-            "messages": [{"role": "user", "content": user_input}]
-        })
-
+ 
+        config = {"configurable": {"thread_id": thread_id}}
+        result = await agent.ainvoke(
+            {"messages": [{"role": "user", "content": user_input}]},
+            config,
+        )
         content = result["messages"][-1].content
-        print("\n" + _extract_text(content) + "\n")
-
+        print(f"\nAssistant: {_extract_text(content)}\n")
+ 
+ 
 if __name__ == "__main__":
     asyncio.run(main())

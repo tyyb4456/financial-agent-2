@@ -3,8 +3,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from langchain.agents import create_agent
-from backend.config.llm import get_llm
-from backend.tools.reddit import fetch_trending_posts
+from config.llm import get_llm
+from tools.reddit import fetch_trending_posts
 
 _llm = get_llm()
 

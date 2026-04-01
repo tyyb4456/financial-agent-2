@@ -3,8 +3,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from langchain.agents import create_agent
-from backend.config.llm import get_llm
-from backend.tools.finance import fetch_financials, fetch_investment_analysis
+from config.llm import get_llm
+from tools.finance import fetch_financials, fetch_investment_analysis
 
 _llm = get_llm()
 

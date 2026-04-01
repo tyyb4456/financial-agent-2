@@ -19,7 +19,7 @@ from langchain.tools import tool
 from tenacity import retry, stop_after_attempt, wait_exponential
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 
-from backend.config.setting import settings
+from config.setting import settings
 
 log = structlog.get_logger(__name__)
 

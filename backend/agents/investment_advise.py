@@ -5,8 +5,8 @@
 # """
 
 import structlog
-from backend.config.llm import get_llm
-from backend.tools.finance import fetch_investment_analysis
+from config.llm import get_llm
+from tools.finance import fetch_investment_analysis
 
 log = structlog.get_logger(__name__)
 _llm = get_llm()
